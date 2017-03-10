@@ -1,5 +1,5 @@
-define(["jupyter-js-widgets", "underscore", "three", "three-text2d", "gl-matrix", "d3"] ,
-        function(widgets, _, THREE, THREEtext2d, glm, d3) {
+define(["jupyter-js-widgets", "underscore", "three", "three-text2d", "gl-matrix", "d3","ndarray"] ,
+        function(widgets, _, THREE, THREEtext2d, glm, d3,ndarray) {
 
 // same strategy as: ipywidgets/jupyter-js-widgets/src/widget_core.ts, except we use ~
 // so that N.M.x is allowed (we don't care about x, but we assume 0.2.x is not compatible with 0.3.x
@@ -29,6 +29,89 @@ shaders["volr_fragment"] = require('../glsl/volr-fragment.glsl');
 shaders["volr_vertex"] = require('../glsl/volr-vertex.glsl');
 shaders["screen_fragment"] = require('../glsl/screen-fragment.glsl');
 shaders["screen_vertex"] = require('../glsl/screen-vertex.glsl');
+
+function asciiDecode(buf) {
+        return String.fromCharCode.apply(null, new Uint8Array(buf));
+}
+
+function readUint16LE(buffer) {
+        var view = new DataView(buffer);
+        var val = view.getUint8(0);
+        val |= view.getUint8(1) << 8;
+        return val;
+}
+
+function deserialize_numpy_array (data){
+  if (data.buffer)
+    return fromArrayBuffer(data.buffer);
+  else {
+    return data
+  }
+};
+
+function fromArrayBuffer(buf) {
+      // Check the magic number
+      //var buf = new ArrayBuffer(buf)
+      //console.log(buf)
+
+      console.log("l",buf.slice(1,6) )
+
+      var magic = asciiDecode(buf.slice(0,6));
+      console.log("La")
+      //return "test"
+      console.log("l",magic.slice(1,6) )
+      if (magic.slice(1,6) != 'NUMPY') {
+          throw new Error('unknown file type');
+      }
+
+      var version = new Uint8Array(buf.slice(6,8)),
+          headerLength = readUint16LE(buf.slice(8,10)),
+          headerStr = asciiDecode(buf.slice(10, 10+headerLength));
+          var offsetBytes = 10 + headerLength;
+          //rest = buf.slice(10+headerLength);  XXX -- This makes a copy!!! https://www.khronos.org/registry/typedarray/specs/latest/#5
+
+      console.log(headerStr.toLowerCase().replace('(','[').replace(',),',']').replace('),',']').replace(/'/g,"\""))
+      var info =  JSON.parse(headerStr.toLowerCase().replace('(','[').replace(',),',']').replace('),',']').replace(/'/g,"\""));
+
+      // Intepret the bytes according to the specified dtype
+      console.log(info)
+      var data;
+      if (info.descr === "|u1") {
+          data = new Uint8Array(buf, offsetBytes);
+      } else if (info.descr === "|i1") {
+          data = new Int8Array(buf, offsetBytes);
+      } else if (info.descr === "<u2") {
+          data = new Uint16Array(buf, offsetBytes);
+      } else if (info.descr === "<i2") {
+          data = new Int16Array(buf, offsetBytes);
+      } else if (info.descr === "<u4") {
+          data = new Uint32Array(buf, offsetBytes);
+      } else if (info.descr === "<i4") {
+          data = new Int32Array(buf, offsetBytes);
+      } else if (info.descr === "<f4") {
+          data = new Float32Array(buf, offsetBytes);
+      } else if (info.descr === "<f8") {
+          data = new Float64Array(buf, offsetBytes);
+      } else {
+          throw new Error('unknown numeric dtype')
+      }
+
+
+    var shape = info.shape;
+    if (shape.length == 2){
+        var ndata = new Array(shape[0])
+
+        for(var i = 0; i< shape[0]; i++){
+            ndata[i] = data.slice(i*shape[1],(i+1)*shape[1])
+        }
+    }
+    else{
+        var ndata = data
+    }
+    return ndata ;
+
+}
+
 
 function to_rgb(color) {
     color = new THREE.Color(color)
@@ -472,6 +555,7 @@ var ScatterView = widgets.WidgetView.extend( {
         var index = this.model.get("sequence_index");
 
         function get_value_index(variable, index){
+            console.log(variable,index)
             if ( !variable){
               // if undefined
               return variable
@@ -484,6 +568,9 @@ var ScatterView = widgets.WidgetView.extend( {
             //1D
             return variable
         }
+
+        console.log("x",this.model.get("x"))
+        console.log("vx",this.model.get("vx"))
 
         var x = get_value_index(this.model.get("x"),index);
         var y = get_value_index(this.model.get("y"),index);
@@ -1480,6 +1567,7 @@ var VolumeRendererThreeModel = widgets.DOMWidgetModel.extend({
 });
 
 var ScatterModel = widgets.WidgetModel.extend({
+
     defaults: function() {
         return _.extend(widgets.WidgetModel.prototype.defaults(), {
             _model_name : 'ScatterModel',
@@ -1494,7 +1582,13 @@ var ScatterModel = widgets.WidgetModel.extend({
             color_selected: "white",
             geo: 'diamond'
         })
-    }
+    }},{
+    serializers: _.extend({
+        x: { deserialize:  deserialize_numpy_array },
+        y: { deserialize:  deserialize_numpy_array },
+        z: { deserialize:  deserialize_numpy_array },
+
+    }, widgets.WidgetModel.serializers)
 });
 
 var WidgetManagerHackModel = widgets.WidgetModel.extend({

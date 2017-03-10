@@ -72,9 +72,18 @@ def cube_to_json(grid, obj=None):
 
 def from_json(value, obj=None):
 	return []
-
 def array_to_json(ar, obj=None):
-	return ar.tolist() if ar is not None else None
+	if ar is None:
+		return None
+	if type(ar) == np.ndarray:
+		known_type = [ "|u1","|i1", "<u2","<i2","<u4","<i4","<f4","<f8"]
+		if ar.dtype in known_type and len(ar.shape) <= 2:
+			iobyte = StringIO()
+			np.save(iobyte,ar)
+			return iobyte.getvalue()
+		else:
+			return ar.tolist()
+	#return ar.tolist() if ar is not None else None
 
 def from_json_to_array(value, obj=None):
 	return np.array(value) if value else None
